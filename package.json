@@ -26,3 +26,28 @@
     "tailwindcss": "^4.0.9"
   }
 }
+{
+  "name": "capsulib",
+  "version": "1.0.0",
+  "description": "Capsule wardrobe management application",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "capsule",
+    "wardrobe",
+    "fashion"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

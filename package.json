@@ -2,11 +2,11 @@
   "name": "capsulib",
   "version": "1.0.0",
   "description": "Capsule wardrobe management application",
-  "main": "backend/server.js",
   "scripts": {
-    "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start-backend": "cd backend && uvicorn main:app --reload",
+    "start-frontend": "cd frontend && npm start",
+    "install-frontend": "cd frontend && npm install",
+    "dev": "concurrently \"npm run start-backend\" \"npm run start-frontend\""
   },
   "keywords": [
     "capsule",
@@ -23,15 +23,7 @@
     "url": "https://github.com/SytzeSimonse/capsulib/issues"
   },
   "homepage": "https://github.com/SytzeSimonse/capsulib#readme",
-  "dependencies": {
-    "axios": "^1.8.1",
-    "cors": "^2.8.5",
-    "express": "^4.18.2"
-  },
   "devDependencies": {
-    "autoprefixer": "^10.4.20",
-    "nodemon": "^3.0.1",
-    "postcss": "^8.5.3",
-    "tailwindcss": "^4.0.9"
+    "concurrently": "^8.2.0"
   }
 }

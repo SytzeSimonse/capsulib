@@ -2,10 +2,10 @@
   "name": "capsulib",
   "version": "1.0.0",
   "description": "Capsule wardrobe management application",
-  "main": "index.js",
+  "main": "backend/server.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
+    "start": "node backend/server.js",
+    "dev": "nodemon backend/server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -18,7 +18,7 @@
     "url": "git+https://github.com/SytzeSimonse/capsulib.git"
   },
   "author": "",
-  "license": "ISC",
+  "license": "GPL-3.0",
   "bugs": {
     "url": "https://github.com/SytzeSimonse/capsulib/issues"
   },

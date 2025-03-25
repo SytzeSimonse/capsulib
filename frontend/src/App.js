@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import ItemList from './components/ItemList';
 import ItemForm from './components/ItemForm';
+import ExportForm from './components/ExportForm';
 import Header from './components/Header';
 
 const API_URL = 'http://localhost:8000';
@@ -10,6 +11,7 @@ function App() {
   const [items, setItems] = useState([]);
   const [currentItem, setCurrentItem] = useState(null);
   const [isFormVisible, setIsFormVisible] = useState(false);
+  const [isExportFormVisible, setIsExportFormVisible] = useState(false);
 
   useEffect(() => {
     fetchItems();
@@ -79,9 +81,17 @@ function App() {
     setIsFormVisible(false);
   };
 
+  const handleExport = () => {
+    setIsExportFormVisible(true);
+  };
+
+  const handleCloseExport = () => {
+    setIsExportFormVisible(false);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header onAddItem={handleAddItem} />
+      <Header onAddItem={handleAddItem} onExport={handleExport} />
       
       <main className="container mx-auto px-4 py-8">
         {isFormVisible ? (
@@ -98,6 +108,10 @@ function App() {
           />
         )}
       </main>
+
+      {isExportFormVisible && (
+        <ExportForm onClose={handleCloseExport} />
+      )}
     </div>
   );
 }

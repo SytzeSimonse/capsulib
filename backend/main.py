@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -7,8 +7,14 @@ from datetime import datetime
 import os
 import uuid
 import shutil
+
+import io
+import csv
+import zipfile
+from fastapi.responses import StreamingResponse
+
 from pydantic import BaseModel
-from database import get_db, Item as DBItem, Color as DBColor, Image as DBImage
+from database import get_db, Item as DBItem, Color as DBColor, Image as DBImage, Material as DBMaterial
 
 app = FastAPI(title="Capsulib API", description="Manage your capsule wardrobe")
 
@@ -40,10 +46,15 @@ class ItemBase(BaseModel):
     name: str
     category: str
     colors: List[str]
-    material: str
+    materials: List[str]
     size: str
     purchase_date: Optional[datetime] = None
-    notes: Optional[str] = None
+    purchase_price: Optional[str] = None
+    condition: Optional[str] = None
+    description: Optional[str] = None
+    season: Optional[str] = None
+    is_second_hand: Optional[bool] = False
+    pattern: Optional[str] = None
 
 class ItemResponse(ItemBase):
     id: int
@@ -71,10 +82,15 @@ def get_items(db: Session = Depends(get_db)):
             "name": db_item.name,
             "category": db_item.category,
             "colors": [color.name for color in db_item.colors],
-            "material": db_item.material,
+            "materials": [material.name for material in db_item.materials],
             "size": db_item.size,
             "purchase_date": db_item.purchase_date,
-            "notes": db_item.notes,
+            "purchase_price": db_item.purchase_price,
+            "condition": db_item.condition,
+            "description": db_item.description,
+            "season": db_item.season,
+            "is_second_hand": db_item.is_second_hand,
+            "pattern": db_item.pattern,
             "images": [image.filename for image in db_item.images],
             "created_at": db_item.created_at,
             "updated_at": db_item.updated_at
@@ -95,10 +111,15 @@ def get_item(item_id: int, db: Session = Depends(get_db)):
         "name": db_item.name,
         "category": db_item.category,
         "colors": [color.name for color in db_item.colors],
-        "material": db_item.material,
+        "materials": [material.name for material in db_item.materials],
         "size": db_item.size,
         "purchase_date": db_item.purchase_date,
-        "notes": db_item.notes,
+        "purchase_price": db_item.purchase_price,
+        "condition": db_item.condition,
+        "description": db_item.description,
+        "season": db_item.season,
+        "is_second_hand": db_item.is_second_hand,
+        "pattern": db_item.pattern,
         "images": [image.filename for image in db_item.images],
         "created_at": db_item.created_at,
         "updated_at": db_item.updated_at
@@ -113,10 +134,14 @@ def create_item(item: ItemBase, db: Session = Depends(get_db)):
         brand=item.brand,
         name=item.name,
         category=item.category,
-        material=item.material,
         size=item.size,
         purchase_date=item.purchase_date,
-        notes=item.notes
+        purchase_price=item.purchase_price,
+        condition=item.condition,
+        description=item.description,
+        season=item.season,
+        is_second_hand=item.is_second_hand,
+        pattern=item.pattern
     )
     
     # Handle colors (create if they don't exist)
@@ -127,6 +152,15 @@ def create_item(item: ItemBase, db: Session = Depends(get_db)):
             db.add(color)
             db.flush()  # Flush to get the color ID
         db_item.colors.append(color)
+    
+    # Handle materials (create if they don't exist)
+    for material_name in item.materials:
+        material = db.query(DBMaterial).filter(DBMaterial.name == material_name).first()
+        if not material:
+            material = DBMaterial(name=material_name)
+            db.add(material)
+            db.flush()  # Flush to get the material ID
+        db_item.materials.append(material)
     
     db.add(db_item)
     db.commit()
@@ -139,10 +173,15 @@ def create_item(item: ItemBase, db: Session = Depends(get_db)):
         "name": db_item.name,
         "category": db_item.category,
         "colors": [color.name for color in db_item.colors],
-        "material": db_item.material,
+        "materials": [material.name for material in db_item.materials],
         "size": db_item.size,
         "purchase_date": db_item.purchase_date,
-        "notes": db_item.notes,
+        "purchase_price": db_item.purchase_price,
+        "condition": db_item.condition,
+        "description": db_item.description,
+        "season": db_item.season,
+        "is_second_hand": db_item.is_second_hand,
+        "pattern": db_item.pattern,
         "images": [image.filename for image in db_item.images],
         "created_at": db_item.created_at,
         "updated_at": db_item.updated_at
@@ -161,10 +200,14 @@ def update_item(item_id: int, updated_item: ItemBase, db: Session = Depends(get_
     db_item.brand = updated_item.brand
     db_item.name = updated_item.name
     db_item.category = updated_item.category
-    db_item.material = updated_item.material
     db_item.size = updated_item.size
     db_item.purchase_date = updated_item.purchase_date
-    db_item.notes = updated_item.notes
+    db_item.purchase_price = updated_item.purchase_price
+    db_item.condition = updated_item.condition
+    db_item.description = updated_item.description
+    db_item.season = updated_item.season
+    db_item.is_second_hand = updated_item.is_second_hand
+    db_item.pattern = updated_item.pattern
     
     # Update colors
     db_item.colors = []  # Remove existing colors
@@ -176,6 +219,16 @@ def update_item(item_id: int, updated_item: ItemBase, db: Session = Depends(get_
             db.flush()  # Flush to get the color ID
         db_item.colors.append(color)
     
+    # Update materials
+    db_item.materials = []  # Remove existing materials
+    for material_name in updated_item.materials:
+        material = db.query(DBMaterial).filter(DBMaterial.name == material_name).first()
+        if not material:
+            material = DBMaterial(name=material_name)
+            db.add(material)
+            db.flush()  # Flush to get the material ID
+        db_item.materials.append(material)
+    
     db.commit()
     db.refresh(db_item)
     
@@ -186,10 +239,15 @@ def update_item(item_id: int, updated_item: ItemBase, db: Session = Depends(get_
         "name": db_item.name,
         "category": db_item.category,
         "colors": [color.name for color in db_item.colors],
-        "material": db_item.material,
+        "materials": [material.name for material in db_item.materials],
         "size": db_item.size,
         "purchase_date": db_item.purchase_date,
-        "notes": db_item.notes,
+        "purchase_price": db_item.purchase_price,
+        "condition": db_item.condition,
+        "description": db_item.description,
+        "season": db_item.season,
+        "is_second_hand": db_item.is_second_hand,
+        "pattern": db_item.pattern,
         "images": [image.filename for image in db_item.images],
         "created_at": db_item.created_at,
         "updated_at": db_item.updated_at
@@ -244,29 +302,128 @@ async def upload_image(item_id: int, file: UploadFile = File(...), db: Session =
     
     return {"filename": unique_filename}
 
-@app.delete("/items/{item_id}/images/{image_id}")
-def delete_image(item_id: int, image_id: int, db: Session = Depends(get_db)):
-    # Find the image
+@app.delete("/items/{item_id}/images/{image_filename}")
+def delete_image(item_id: int, image_filename: str, db: Session = Depends(get_db)):
+    # Get existing item
+    db_item = db.query(DBItem).filter(DBItem.id == item_id).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    # Find the image in the database
     db_image = db.query(DBImage).filter(
-        DBImage.id == image_id, 
-        DBImage.item_id == item_id
+        DBImage.item_id == item_id,
+        DBImage.filename == image_filename
     ).first()
     
     if not db_image:
         raise HTTPException(status_code=404, detail="Image not found")
     
-    # Delete file from filesystem
+    # Delete the image file from filesystem
     try:
-        os.remove(os.path.join(UPLOAD_DIR, db_image.filename))
+        os.remove(os.path.join(UPLOAD_DIR, image_filename))
     except Exception as e:
-        # Log error but continue with DB deletion
+        # Log error but continue with deletion
         print(f"Error removing image file: {e}")
     
-    # Delete from database
+    # Delete the image from database
     db.delete(db_image)
     db.commit()
     
     return {"message": "Image deleted successfully"}
+
+@app.get("/export")
+def export_items(fields: str = Query(...), db: Session = Depends(get_db)):
+    """
+    Export items to CSV with selected fields.
+    
+    fields: Comma-separated list of fields to include in the export
+    """
+    selected_fields = fields.split(',')
+    
+    # Get all items from database
+    db_items = db.query(DBItem).all()
+    
+    # Check if we need to include image URLs or files
+    include_image_urls = 'include_image_urls' in selected_fields
+    include_image_files = 'include_image_files' in selected_fields
+    
+    # Remove special fields from the regular field list
+    if include_image_urls:
+        selected_fields.remove('include_image_urls')
+    if include_image_files:
+        selected_fields.remove('include_image_files')
+    
+    # Create CSV file in memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header row
+    header_row = selected_fields.copy()
+    if include_image_urls:
+        header_row.append('image_urls')
+    writer.writerow(header_row)
+    
+    # Write data rows
+    for item in db_items:
+        row = []
+        
+        for field in selected_fields:
+            if field == 'colors':
+                # Join colors with semicolons
+                value = ';'.join([color.name for color in item.colors]) if item.colors else ''
+            elif field == 'materials':
+                # Join materials with semicolons
+                value = ';'.join([material.name for material in item.materials]) if item.materials else ''
+            elif field in ('created_at', 'updated_at', 'purchase_date') and getattr(item, field):
+                # Format dates
+                value = getattr(item, field).isoformat()
+            else:
+                # Get regular attribute
+                value = getattr(item, field, '')
+            
+            row.append(value)
+        
+        # Add image URLs if requested
+        if include_image_urls:
+            image_urls = [f"{UPLOAD_DIR}/{image.filename}" for image in item.images]
+            row.append(';'.join(image_urls))
+        
+        writer.writerow(row)
+    
+    # Get CSV as string
+    output.seek(0)
+    csv_data = output.getvalue()
+    
+    # If we're including image files, create a ZIP file
+    if include_image_files:
+        # Create a ZIP file in memory
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # Add CSV file to ZIP
+            zip_file.writestr('capsulib_export.csv', csv_data)
+            
+            # Add all images to ZIP
+            for item in db_items:
+                for image in item.images:
+                    image_path = os.path.join(UPLOAD_DIR, image.filename)
+                    if os.path.exists(image_path):
+                        with open(image_path, 'rb') as img_file:
+                            zip_file.writestr(f"images/{image.filename}", img_file.read())
+        
+        # Return ZIP file
+        zip_buffer.seek(0)
+        return StreamingResponse(
+            zip_buffer, 
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename=capsulib_export.zip"}
+        )
+    
+    # Return CSV file
+    return StreamingResponse(
+        io.StringIO(csv_data),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=capsulib_export.csv"}
+    )
 
 if __name__ == "__main__":
     import uvicorn

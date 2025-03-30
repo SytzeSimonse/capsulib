@@ -1,8 +1,8 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 import os
 import uuid
@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from pydantic import BaseModel
 from database import get_db, Item as DBItem, Color as DBColor, Image as DBImage, Material as DBMaterial
+import json
 
 app = FastAPI(title="Capsulib API", description="Manage your capsule wardrobe")
 
@@ -64,6 +65,12 @@ class ItemResponse(ItemBase):
 
     class Config:
         orm_mode = True
+
+class ImportPreviewResponse(BaseModel):
+    headers: List[str]
+    preview_rows: List[List[str]]
+    available_fields: List[str]
+    required_fields: List[str]
 
 @app.get("/")
 def read_root():
@@ -424,6 +431,227 @@ def export_items(fields: str = Query(...), db: Session = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=capsulib_export.csv"}
     )
+
+@app.post("/items/import/preview", response_model=ImportPreviewResponse)
+async def preview_import(file: UploadFile = File(...)):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+    
+    try:
+        contents = await file.read()
+        csv_file = io.StringIO(contents.decode('utf-8'))
+        csv_reader = csv.DictReader(csv_file)
+        
+        # Get headers
+        headers = csv_reader.fieldnames or []
+        
+        # Get preview rows (first 5 rows)
+        preview_rows = []
+        for i, row in enumerate(csv_reader):
+            if i >= 5:  # Only show first 5 rows
+                break
+            preview_rows.append([row.get(header, '') for header in headers])
+        
+        # Define available fields in our system
+        available_fields = [
+            'name', 'brand', 'category', 'size', 'colors', 'materials',
+            'pattern', 'season', 'condition', 'purchase_date', 'purchase_price',
+            'description', 'is_second_hand'
+        ]
+        
+        # Define required fields
+        required_fields = ['name']
+        
+        return {
+            "headers": headers,
+            "preview_rows": preview_rows,
+            "available_fields": available_fields,
+            "required_fields": required_fields
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error processing CSV: {str(e)}")
+
+@app.post("/items/import")
+async def import_items(
+    file: UploadFile = File(...),
+    mappings: str = Form(...),  # JSON string of column mappings
+    db: Session = Depends(get_db)
+):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+    
+    try:
+        # Parse mappings from JSON string
+        column_mappings = json.loads(mappings)
+        
+        contents = await file.read()
+        csv_file = io.StringIO(contents.decode('utf-8'))
+        csv_reader = csv.DictReader(csv_file)
+        
+        imported_count = 0
+        updated_count = 0
+        skipped_count = 0
+        
+        for row in csv_reader:
+            # Skip rows that only have an ID or are empty
+            has_content = False
+            for csv_column, field_name in column_mappings.items():
+                if field_name and csv_column in row and row[csv_column].strip():
+                    has_content = True
+                    break
+            
+            if not has_content:
+                skipped_count += 1
+                continue
+            
+            # Create item data using the mappings
+            item_data = {}
+            for csv_column, field_name in column_mappings.items():
+                if field_name and csv_column in row:
+                    value = row[csv_column].strip()
+                    
+                    # Skip if the value is empty
+                    if not value:
+                        continue
+                    
+                    # Process special fields
+                    if field_name == 'purchase_date' and value:
+                        try:
+                            # Try different date formats
+                            try:
+                                value = datetime.strptime(value, '%Y-%m-%d')
+                            except ValueError:
+                                try:
+                                    value = datetime.strptime(value, '%m/%d/%Y')
+                                except ValueError:
+                                    value = datetime.strptime(value, '%d/%m/%Y')
+                        except ValueError:
+                            value = None
+                    
+                    elif field_name == 'purchase_price' and value:
+                        # Remove currency and convert comma to dot
+                        value = value.replace('EUR', '').replace(',', '.').strip()
+                    
+                    elif field_name == 'colors' and value:
+                        # Split by comma or semicolon
+                        value = [c.strip() for c in value.replace(';', ',').split(',') if c.strip()]
+                    
+                    elif field_name == 'materials' and value:
+                        # Split by comma or semicolon
+                        value = [m.strip() for m in value.replace(';', ',').split(',') if m.strip()]
+                    
+                    elif field_name == 'is_second_hand' and value:
+                        value = value.lower() in ['true', 'second-hand', 'secondhand', 'used']
+                    
+                    item_data[field_name] = value
+            
+            # Skip if no name is provided
+            if not item_data.get('name'):
+                skipped_count += 1
+                continue
+            
+            # Check if item with same name exists
+            existing_item = db.query(DBItem).filter(DBItem.name == item_data['name']).first()
+            
+            if existing_item:
+                # Update only the mapped fields
+                for field, value in item_data.items():
+                    if field == 'colors':
+                        # Clear existing colors and add new ones
+                        existing_item.colors = []
+                        for color_name in value:
+                            color = db.query(DBColor).filter(DBColor.name == color_name).first()
+                            if not color:
+                                color = DBColor(name=color_name)
+                                db.add(color)
+                                db.flush()
+                            existing_item.colors.append(color)
+                    elif field == 'materials':
+                        # Clear existing materials and add new ones
+                        existing_item.materials = []
+                        for material_name in value:
+                            material = db.query(DBMaterial).filter(DBMaterial.name == material_name).first()
+                            if not material:
+                                material = DBMaterial(name=material_name)
+                                db.add(material)
+                                db.flush()
+                            existing_item.materials.append(material)
+                    else:
+                        # Update other fields
+                        setattr(existing_item, field, value)
+                
+                updated_count += 1
+            else:
+                # Create new item with only mapped fields
+                db_item = DBItem(
+                    name=item_data.get('name', ''),
+                    brand=item_data.get('brand', ''),
+                    category=item_data.get('category', ''),
+                    size=item_data.get('size', ''),
+                    purchase_date=item_data.get('purchase_date'),
+                    purchase_price=item_data.get('purchase_price'),
+                    condition=item_data.get('condition'),
+                    description=item_data.get('description'),
+                    season=item_data.get('season'),
+                    is_second_hand=item_data.get('is_second_hand', False),
+                    pattern=item_data.get('pattern')
+                )
+                
+                # Add colors only if mapped
+                if 'colors' in item_data:
+                    for color_name in item_data['colors']:
+                        color = db.query(DBColor).filter(DBColor.name == color_name).first()
+                        if not color:
+                            color = DBColor(name=color_name)
+                            db.add(color)
+                            db.flush()
+                        db_item.colors.append(color)
+                
+                # Add materials only if mapped
+                if 'materials' in item_data:
+                    for material_name in item_data['materials']:
+                        material = db.query(DBMaterial).filter(DBMaterial.name == material_name).first()
+                        if not material:
+                            material = DBMaterial(name=material_name)
+                            db.add(material)
+                            db.flush()
+                        db_item.materials.append(material)
+                
+                db.add(db_item)
+                imported_count += 1
+        
+        db.commit()
+        return {
+            "message": f"Successfully imported {imported_count} new items and updated {updated_count} existing items",
+            "imported": imported_count,
+            "updated": updated_count,
+            "skipped": skipped_count
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Error importing items: {str(e)}")
+
+@app.delete("/items")
+def delete_all_items(db: Session = Depends(get_db)):
+    try:
+        # Delete all images from filesystem
+        db_images = db.query(DBImage).all()
+        for image in db_images:
+            try:
+                os.remove(os.path.join(UPLOAD_DIR, image.filename))
+            except Exception as e:
+                # Log error but continue with deletion
+                print(f"Error removing image file: {e}")
+        
+        # Delete all items from database
+        db.query(DBItem).delete()
+        db.commit()
+        
+        return {"message": "All items deleted successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting items: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

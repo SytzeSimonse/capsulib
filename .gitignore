@@ -1,3 +1,8 @@
+# Development Environment
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v3/
+
 # Virtual Environment
 capsulib_venv/
 venv/

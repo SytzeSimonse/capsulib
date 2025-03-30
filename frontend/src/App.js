@@ -2,116 +2,147 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import ItemList from './components/ItemList';
 import ItemForm from './components/ItemForm';
-import ExportForm from './components/ExportForm';
+import ImportForm from './components/ImportForm';
 import Header from './components/Header';
+import ConfirmationDialog from './components/ConfirmationDialog';
 
 const API_URL = 'http://localhost:8000';
 
 function App() {
   const [items, setItems] = useState([]);
+  const [showItemForm, setShowItemForm] = useState(false);
+  const [showImportForm, setShowImportForm] = useState(false);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [currentItem, setCurrentItem] = useState(null);
-  const [isFormVisible, setIsFormVisible] = useState(false);
-  const [isExportFormVisible, setIsExportFormVisible] = useState(false);
-
-  useEffect(() => {
-    fetchItems();
-  }, []);
 
   const fetchItems = async () => {
     try {
       const response = await axios.get(`${API_URL}/items`);
       setItems(response.data);
     } catch (error) {
-      console.error('Error fetching items:', error);
+      setError('Error fetching items');
+      console.error('Error:', error);
     }
   };
 
-  const handleAddItem = () => {
-    setCurrentItem(null);
-    setIsFormVisible(true);
+  useEffect(() => {
+    fetchItems();
+  }, []);
+
+  const handleAddItem = async (itemData) => {
+    try {
+      await axios.post(`${API_URL}/items`, itemData);
+      fetchItems();
+      setShowItemForm(false);
+      setCurrentItem(null);
+    } catch (error) {
+      setError('Error adding item');
+      console.error('Error:', error);
+    }
+  };
+
+  const handleUpdateItem = async (itemData) => {
+    try {
+      await axios.put(`${API_URL}/items/${currentItem.id}`, itemData);
+      fetchItems();
+      setShowItemForm(false);
+      setCurrentItem(null);
+    } catch (error) {
+      setError('Error updating item');
+      console.error('Error:', error);
+    }
+  };
+
+  const handleDeleteItem = async (itemId) => {
+    try {
+      await axios.delete(`${API_URL}/items/${itemId}`);
+      fetchItems();
+    } catch (error) {
+      setError('Error deleting item');
+      console.error('Error:', error);
+    }
+  };
+
+  const handleDeleteWardrobe = async () => {
+    setIsLoading(true);
+    try {
+      await axios.delete(`${API_URL}/items`);
+      setItems([]);
+      setShowDeleteConfirmation(false);
+    } catch (error) {
+      setError('Error deleting wardrobe');
+      console.error('Error:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleImportComplete = () => {
+    fetchItems();
+    setShowImportForm(false);
   };
 
   const handleEditItem = (item) => {
     setCurrentItem(item);
-    setIsFormVisible(true);
-  };
-
-  const handleDeleteItem = async (itemId) => {
-    if (window.confirm('Are you sure you want to delete this item?')) {
-      try {
-        await axios.delete(`${API_URL}/items/${itemId}`);
-        fetchItems();
-      } catch (error) {
-        console.error('Error deleting item:', error);
-      }
-    }
-  };
-
-  const handleFormSubmit = async (formData, images) => {
-    try {
-      let response;
-      
-      if (currentItem) {
-        // Update existing item
-        response = await axios.put(`${API_URL}/items/${currentItem.id}`, formData);
-      } else {
-        // Create new item
-        response = await axios.post(`${API_URL}/items`, formData);
-      }
-      
-      const item = response.data;
-      
-      // Upload images if any
-      if (images && images.length > 0) {
-        for (const image of images) {
-          const formData = new FormData();
-          formData.append('file', image);
-          await axios.post(`${API_URL}/items/${item.id}/images`, formData);
-        }
-      }
-      
-      setIsFormVisible(false);
-      fetchItems();
-    } catch (error) {
-      console.error('Error saving item:', error);
-    }
-  };
-
-  const handleCloseForm = () => {
-    setIsFormVisible(false);
-  };
-
-  const handleExport = () => {
-    setIsExportFormVisible(true);
-  };
-
-  const handleCloseExport = () => {
-    setIsExportFormVisible(false);
+    setShowItemForm(true);
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header onAddItem={handleAddItem} onExport={handleExport} />
+    <div className="min-h-screen bg-gray-100">
+      <Header 
+        onAddItem={() => {
+          setCurrentItem(null);
+          setShowItemForm(true);
+        }}
+        onExport={() => {/* TODO: Implement export */}}
+        onImport={() => setShowImportForm(true)}
+        onDeleteWardrobe={() => setShowDeleteConfirmation(true)}
+      />
       
-      <main className="container mx-auto px-4 py-8">
-        {isFormVisible ? (
-          <ItemForm 
-            item={currentItem} 
-            onSubmit={handleFormSubmit} 
-            onCancel={handleCloseForm} 
-          />
-        ) : (
-          <ItemList 
-            items={items} 
-            onEditItem={handleEditItem} 
-            onDeleteItem={handleDeleteItem}
-          />
-        )}
-      </main>
+      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-6 sm:px-0">
+          {error && (
+            <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
+              {error}
+            </div>
+          )}
 
-      {isExportFormVisible && (
-        <ExportForm onClose={handleCloseExport} />
-      )}
+          {showItemForm ? (
+            <ItemForm
+              item={currentItem}
+              onClose={() => {
+                setShowItemForm(false);
+                setCurrentItem(null);
+              }}
+              onSubmit={currentItem 
+                ? (itemData) => handleUpdateItem(itemData)
+                : handleAddItem
+              }
+            />
+          ) : showImportForm ? (
+            <ImportForm
+              onClose={() => setShowImportForm(false)}
+              onImportComplete={handleImportComplete}
+            />
+          ) : (
+            <ItemList
+              items={items}
+              onEditItem={handleEditItem}
+              onDeleteItem={handleDeleteItem}
+            />
+          )}
+        </div>
+      </div>
+
+      <ConfirmationDialog
+        isOpen={showDeleteConfirmation}
+        onClose={() => setShowDeleteConfirmation(false)}
+        onConfirm={handleDeleteWardrobe}
+        title="Delete Wardrobe"
+        message="Are you sure you want to delete all items in your wardrobe? This action cannot be undone."
+      />
     </div>
   );
 }

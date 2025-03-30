@@ -25,6 +25,14 @@ item_colors = Table(
     Column("color_id", Integer, ForeignKey("colors.id")),
 )
 
+# Association table for item materials (many-to-many)
+item_materials = Table(
+    "item_materials",
+    Base.metadata,
+    Column("item_id", Integer, ForeignKey("items.id")),
+    Column("material_id", Integer, ForeignKey("materials.id")),
+)
+
 class Color(Base):
     __tablename__ = "colors"
     
@@ -33,6 +41,14 @@ class Color(Base):
     
     items = relationship("Item", secondary=item_colors, back_populates="colors")
 
+class Material(Base):
+    __tablename__ = "materials"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    
+    items = relationship("Item", secondary=item_materials, back_populates="materials")
+
 class Item(Base):
     __tablename__ = "items"
     
@@ -40,14 +56,19 @@ class Item(Base):
     brand = Column(String, index=True)
     name = Column(String)
     category = Column(String, index=True)
-    material = Column(String)
     size = Column(String)
     purchase_date = Column(DateTime, nullable=True)
-    notes = Column(String, nullable=True)
+    purchase_price = Column(String, nullable=True)
+    condition = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    season = Column(String, nullable=True)
+    is_second_hand = Column(String, nullable=True)
+    pattern = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     
     colors = relationship("Color", secondary=item_colors, back_populates="items")
+    materials = relationship("Material", secondary=item_materials, back_populates="items")
     images = relationship("Image", back_populates="item")
 
 class Image(Base):

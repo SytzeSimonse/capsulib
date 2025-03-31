@@ -93,7 +93,8 @@ const ItemForm = ({ item, onSubmit, onClose }) => {
     description: '',
     season: '',
     is_second_hand: false,
-    pattern: ''
+    pattern: '',
+    url: ''
   });
   
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -116,7 +117,8 @@ const ItemForm = ({ item, onSubmit, onClose }) => {
         description: item.description || '',
         season: item.season || '',
         is_second_hand: item.is_second_hand || false,
-        pattern: item.pattern || ''
+        pattern: item.pattern || '',
+        url: item.url || ''
       });
       setPreviewUrls(item.images || []);
     }
@@ -217,7 +219,8 @@ const ItemForm = ({ item, onSubmit, onClose }) => {
           description: '',
           season: '',
           is_second_hand: false,
-          pattern: ''
+          pattern: '',
+          url: ''
         });
         setSelectedFiles([]);
         setPreviewUrls([]);
@@ -410,6 +413,18 @@ const ItemForm = ({ item, onSubmit, onClose }) => {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-gray-700 mb-1">Store URL</label>
+            <input
+              type="url"
+              name="url"
+              value={formData.url}
+              onChange={handleInputChange}
+              placeholder="https://"
+              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
           </div>
         </div>
         

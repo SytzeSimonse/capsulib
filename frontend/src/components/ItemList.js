@@ -12,7 +12,7 @@ const ItemList = ({ items, onEditItem, onDeleteItem }) => {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4">Your Wardrobe Items</h2>
+      <h2 className="text-xl font-semibold mb-4">Your Wardrobe Items ({items.length})</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {items.map((item) => (
           <div key={item.id} className="bg-white rounded-lg shadow overflow-hidden">

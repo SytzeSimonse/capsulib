@@ -56,6 +56,7 @@ class ItemBase(BaseModel):
     season: Optional[str] = None
     is_second_hand: Optional[bool] = False
     pattern: Optional[str] = None
+    url: Optional[str] = None
 
 class ItemResponse(ItemBase):
     id: int

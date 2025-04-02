@@ -79,7 +79,7 @@ const PATTERNS = [
   { name: 'Sequined', icon: '💫' }
 ];
 
-const ItemForm = ({ item, onSubmit, onCancel }) => {
+const ItemForm = ({ item, onSubmit, onClose }) => {
   const [formData, setFormData] = useState({
     brand: '',
     name: '',
@@ -98,87 +98,133 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
   
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [previewUrls, setPreviewUrls] = useState([]);
-  const [existingImages, setExistingImages] = useState([]);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    // Initialize form data when editing an item
     if (item) {
       setFormData({
-        ...item,
+        brand: item.brand || '',
+        name: item.name || '',
+        category: item.category || '',
+        colors: item.colors || [],
+        materials: item.materials || [],
+        size: item.size || '',
         purchase_date: item.purchase_date ? item.purchase_date.split('T')[0] : '',
-        // Handle arrays
-        colors: Array.isArray(item.colors) ? item.colors : [],
-        materials: Array.isArray(item.materials) ? item.materials : [],
-        // Handle boolean
-        is_second_hand: item.is_second_hand || false
+        purchase_price: item.purchase_price || '',
+        condition: item.condition || '',
+        description: item.description || '',
+        season: item.season || '',
+        is_second_hand: item.is_second_hand || false,
+        pattern: item.pattern || ''
       });
-      
-      // Set existing images
-      if (item.images && item.images.length > 0) {
-        setExistingImages(item.images);
-      }
+      setPreviewUrls(item.images || []);
     }
   }, [item]);
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value
-    });
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
   };
 
   const handleMaterialChange = (material) => {
-    setFormData(prev => {
-      const materials = prev.materials.includes(material)
+    setFormData(prev => ({
+      ...prev,
+      materials: prev.materials.includes(material)
         ? prev.materials.filter(m => m !== material)
-        : [...prev.materials, material];
-      return { ...prev, materials };
-    });
+        : [...prev.materials, material]
+    }));
   };
 
   const handleColorChange = (color) => {
-    setFormData(prev => {
-      const colors = prev.colors.includes(color)
+    setFormData(prev => ({
+      ...prev,
+      colors: prev.colors.includes(color)
         ? prev.colors.filter(c => c !== color)
-        : [...prev.colors, color];
-      return { ...prev, colors };
-    });
+        : [...prev.colors, color]
+    }));
   };
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
-    
-    // Check if adding these files would exceed the 10-image limit
-    if (existingImages.length + selectedFiles.length + files.length > 10) {
-      alert('You can only upload up to 10 images per item');
-      return;
-    }
-    
     setSelectedFiles(prev => [...prev, ...files]);
     
-    // Create preview URLs for new files
-    const newUrls = files.map(file => URL.createObjectURL(file));
-    setPreviewUrls(prev => [...prev, ...newUrls]);
+    // Create preview URLs
+    const newPreviewUrls = files.map(file => URL.createObjectURL(file));
+    setPreviewUrls(prev => [...prev, ...newPreviewUrls]);
   };
 
   const handleRemoveImage = (index, isExisting = false) => {
     if (isExisting) {
-      // Remove from existing images
-      setExistingImages(prev => prev.filter((_, i) => i !== index));
+      setPreviewUrls(prev => prev.filter((_, i) => i !== index));
     } else {
-      // Revoke the object URL to prevent memory leaks
-      URL.revokeObjectURL(previewUrls[index]);
-      
-      // Remove the file and its preview URL
       setSelectedFiles(prev => prev.filter((_, i) => i !== index));
       setPreviewUrls(prev => prev.filter((_, i) => i !== index));
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSubmit(formData, selectedFiles);
+    setError('');
+    setSuccess(false);
+
+    // Only validate name field
+    if (!formData.name.trim()) {
+      setError('Name is required');
+      return;
+    }
+
+    try {
+      // If we have files to upload, use FormData
+      if (selectedFiles.length > 0) {
+        const submitData = new FormData();
+        Object.keys(formData).forEach(key => {
+          if (key === 'colors' || key === 'materials') {
+            submitData.append(key, JSON.stringify(formData[key]));
+          } else {
+            submitData.append(key, formData[key]);
+          }
+        });
+
+        // Append new files
+        selectedFiles.forEach(file => {
+          submitData.append('images', file);
+        });
+
+        await onSubmit(submitData);
+      } else {
+        // If no files to upload, send as regular JSON
+        await onSubmit(formData);
+      }
+      
+      setSuccess(true);
+      
+      // Reset form after successful submission if it's not an edit
+      if (!item) {
+        setFormData({
+          brand: '',
+          name: '',
+          category: '',
+          colors: [],
+          materials: [],
+          size: '',
+          purchase_date: '',
+          purchase_price: '',
+          condition: '',
+          description: '',
+          season: '',
+          is_second_hand: false,
+          pattern: ''
+        });
+        setSelectedFiles([]);
+        setPreviewUrls([]);
+      }
+    } catch (error) {
+      setError(error.response?.data?.detail || 'Error submitting form');
+    }
   };
 
   return (
@@ -187,6 +233,18 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
         {item ? 'Edit Item' : 'Add New Item'}
       </h2>
       
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
+          {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-4 p-3 bg-green-100 text-green-700 rounded">
+          {item ? 'Item updated successfully!' : 'Item added successfully!'}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
@@ -197,7 +255,6 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
               value={formData.brand}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
             />
           </div>
           
@@ -209,7 +266,6 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
               value={formData.name}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
             />
           </div>
           
@@ -220,7 +276,6 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
               value={formData.category}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
             >
               <option value="">Select category</option>
               <option value="tops">Tops</option>
@@ -239,7 +294,6 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
               value={formData.condition}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
             >
               <option value="">Select condition</option>
               {ITEM_CONDITIONS.map(condition => (
@@ -273,7 +327,6 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
               value={formData.size}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
             />
           </div>
           
@@ -308,7 +361,6 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
               value={formData.season}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
             >
               <option value="">Select season</option>
               {SEASONS.map(season => (
@@ -350,7 +402,6 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
               value={formData.pattern}
               onChange={handleInputChange}
               className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
             >
               <option value="">Select pattern</option>
               {PATTERNS.map(pattern => (
@@ -389,7 +440,7 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
           <label className="block text-gray-700 mb-1">
             Images (up to 10)
             <span className="text-sm text-gray-500 ml-2">
-              {existingImages.length + selectedFiles.length}/10 images
+              {previewUrls.length}/10 images
             </span>
           </label>
           <input
@@ -398,37 +449,14 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
             className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
             multiple
             accept="image/*"
-            disabled={existingImages.length + selectedFiles.length >= 10}
+            disabled={previewUrls.length >= 10}
           />
           
-          {(existingImages.length > 0 || previewUrls.length > 0) && (
+          {previewUrls.length > 0 && (
             <div className="mt-4">
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {/* Existing images */}
-                {existingImages.map((image, index) => (
-                  <div key={`existing-${index}`} className="relative group">
-                    <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
-                      <img
-                        src={`http://localhost:8000/uploads/${image}`}
-                        alt={`Existing image ${index + 1}`}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveImage(index, true)}
-                      className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-                
-                {/* New image previews */}
                 {previewUrls.map((url, index) => (
-                  <div key={`new-${index}`} className="relative group">
+                  <div key={`image-${index}`} className="relative group">
                     <div className="aspect-square bg-gray-100 rounded-lg overflow-hidden">
                       <img
                         src={url}
@@ -467,7 +495,7 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
         <div className="flex justify-end space-x-4">
           <button
             type="button"
-            onClick={onCancel}
+            onClick={onClose}
             className="px-4 py-2 text-gray-700 border border-gray-300 rounded hover:bg-gray-50"
           >
             Cancel
@@ -476,7 +504,7 @@ const ItemForm = ({ item, onSubmit, onCancel }) => {
             type="submit"
             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
-            {item ? 'Update Item' : 'Create Item'}
+            {item ? 'Update Item' : 'Add Item'}
           </button>
         </div>
       </form>

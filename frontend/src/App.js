@@ -45,7 +45,28 @@ function App() {
 
   const handleUpdateItem = async (itemData) => {
     try {
-      await axios.put(`${API_URL}/items/${currentItem.id}`, itemData);
+      // Create a copy of the data to modify
+      const formattedData = { ...itemData };
+      
+      // Convert empty strings to null or appropriate default values
+      Object.keys(formattedData).forEach(key => {
+        if (formattedData[key] === '') {
+          if (key === 'colors' || key === 'materials') {
+            formattedData[key] = [];
+          } else if (key === 'is_second_hand') {
+            formattedData[key] = false;
+          } else {
+            formattedData[key] = null;
+          }
+        }
+      });
+
+      // If purchase_date is not empty, ensure it's in ISO format
+      if (formattedData.purchase_date) {
+        formattedData.purchase_date = new Date(formattedData.purchase_date).toISOString();
+      }
+
+      await axios.put(`${API_URL}/items/${currentItem.id}`, formattedData);
       fetchItems();
       setShowItemForm(false);
       setCurrentItem(null);

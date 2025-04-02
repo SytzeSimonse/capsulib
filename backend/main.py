@@ -43,12 +43,12 @@ class ImageBase(BaseModel):
     filename: str
 
 class ItemBase(BaseModel):
-    brand: str
+    brand: Optional[str] = ""
     name: str
-    category: str
-    colors: List[str]
-    materials: List[str]
-    size: str
+    category: Optional[str] = ""
+    colors: Optional[List[str]] = []
+    materials: Optional[List[str]] = []
+    size: Optional[str] = ""
     purchase_date: Optional[datetime] = None
     purchase_price: Optional[str] = None
     condition: Optional[str] = None

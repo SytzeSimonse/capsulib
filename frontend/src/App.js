@@ -35,9 +35,10 @@ function App() {
     }
   };
 
-  // Add a new useEffect that runs when selectedCategory changes
+  // Fetch items when component mounts and when selectedCategory changes
   useEffect(() => {
     fetchItems();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCategory]);
   
   const handleAddItem = async (itemData) => {

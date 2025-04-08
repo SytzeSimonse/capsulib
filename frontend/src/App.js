@@ -13,13 +13,17 @@ function App() {
   const [showItemForm, setShowItemForm] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentItem, setCurrentItem] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
+  // Fetch Items
   const fetchItems = async () => {
     try {
-      const response = await axios.get(`${API_URL}/items`);
+      const response = await axios.get(`${API_URL}/items`, {
+        params: selectedCategory ? { category: selectedCategory } : {}
+    });
       setItems(response.data);
     } catch (error) {
       setError('Error fetching items');
@@ -27,10 +31,11 @@ function App() {
     }
   };
 
+  // Add a new useEffect that runs when selectedCategory changes
   useEffect(() => {
     fetchItems();
-  }, []);
-
+  }, [selectedCategory]);
+  
   const handleAddItem = async (itemData) => {
     try {
       await axios.post(`${API_URL}/items`, itemData);
@@ -152,6 +157,8 @@ function App() {
               items={items}
               onEditItem={handleEditItem}
               onDeleteItem={handleDeleteItem}
+              selectedCategory={selectedCategory}
+              onCategoryChange={setSelectedCategory}
             />
           )}
         </div>

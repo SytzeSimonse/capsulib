@@ -21,11 +21,25 @@ const COLOR_MAP = {
 };
 
 const ItemList = ({ items, onEditItem, onDeleteItem, selectedCategory, onCategoryChange }) => {
-  if (items.length === 0) {
+  // Check if there are any items in the wardrobe
+  const hasItems = items.length > 0;
+  
+  // If no items at all, show empty wardrobe message
+  if (!hasItems && !selectedCategory) {
     return (
       <div className="text-center py-16">
         <h2 className="text-xl font-medium text-gray-600">Your wardrobe is empty</h2>
         <p className="mt-2 text-gray-500">Start adding items to your capsule wardrobe</p>
+      </div>
+    );
+  }
+  
+  // If category is selected but no items in that category
+  if (!hasItems && selectedCategory) {
+    return (
+      <div className="text-center py-16">
+        <h2 className="text-xl font-medium text-gray-600">No items within this category</h2>
+        <p className="mt-2 text-gray-500">Try selecting a different category</p>
       </div>
     );
   }
@@ -44,16 +58,7 @@ const ItemList = ({ items, onEditItem, onDeleteItem, selectedCategory, onCategor
         onCategoryChange={onCategoryChange}
       />
       
-      {items.length === 0 ? (
-        <div className="text-center py-16">
-          <h2 className="text-xl font-medium text-gray-600">
-            {selectedCategory ? `No items found in the "${selectedCategory}" category` : "Your wardrobe is empty"}
-          </h2>
-          <p className="mt-2 text-gray-500">
-            {selectedCategory ? "Try selecting a different category" : "Start adding items to your capsule wardrobe"}
-          </p>
-        </div>
-      ) : (
+      {(
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {items.map((item) => (
             <div key={item.id} className="bg-white rounded-lg shadow overflow-hidden">

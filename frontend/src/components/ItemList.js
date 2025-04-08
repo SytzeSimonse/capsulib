@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Fragment } from 'react';
 import CategoryFilter from './CategoryFilter';
 
 // Color mapping for common colors
@@ -20,7 +20,7 @@ const COLOR_MAP = {
   'Khaki': '#F0E68C'
 };
 
-const ItemList = ({ items, onEditItem, onDeleteItem, selectedCategory, onCategoryChange }) => {
+const ItemList = ({ items, onEditItem, onDeleteItem, selectedCategory, onCategoryChange, totalItemCount }) => {
   // Check if there are any items in the wardrobe
   const hasItems = items.length > 0;
   
@@ -37,9 +37,18 @@ const ItemList = ({ items, onEditItem, onDeleteItem, selectedCategory, onCategor
   // If category is selected but no items in that category
   if (!hasItems && selectedCategory) {
     return (
-      <div className="text-center py-16">
-        <h2 className="text-xl font-medium text-gray-600">No items within this category</h2>
-        <p className="mt-2 text-gray-500">Try selecting a different category</p>
+      <div>
+        <h2 className="text-xl font-semibold mb-4">Your Wardrobe Items (0/{totalItemCount})</h2>
+        
+        <CategoryFilter 
+          selectedCategory={selectedCategory}
+          onCategoryChange={onCategoryChange}
+        />
+        
+        <div className="text-center py-16">
+          <h2 className="text-xl font-medium text-gray-600">No items within this category</h2>
+          <p className="mt-2 text-gray-500">Try selecting a different category</p>
+        </div>
       </div>
     );
   }
@@ -51,7 +60,9 @@ const ItemList = ({ items, onEditItem, onDeleteItem, selectedCategory, onCategor
 
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4">Your Wardrobe Items ({items.length})</h2>
+      <h2 className="text-xl font-semibold mb-4">
+        Your Wardrobe Items ({selectedCategory ? `${items.length}/${totalItemCount}` : items.length})
+      </h2>
       
       <CategoryFilter 
         selectedCategory={selectedCategory}

@@ -24,9 +24,17 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
 
   // Fetch Items
+  const [totalItemCount, setTotalItemCount] = useState(0);
+
   const fetchItems = async () => {
     try {
       setIsLoading(true);
+      
+      // First, get total count of all items
+      const totalResponse = await axios.get(`${API_URL}/items`);
+      setTotalItemCount(totalResponse.data.length);
+      
+      // Then get filtered items if category is selected
       const response = await axios.get(`${API_URL}/items`, {
         params: selectedCategory ? { category: selectedCategory } : {}
       });
@@ -169,6 +177,7 @@ function App() {
               onDeleteItem={handleDeleteItem}
               selectedCategory={selectedCategory}
               onCategoryChange={handleCategoryChange}
+              totalItemCount={totalItemCount}
             />
           )}
         </div>

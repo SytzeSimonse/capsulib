@@ -78,9 +78,14 @@ def read_root():
 
 @app.get("/items", response_model=List[ItemResponse])
 def get_items(category: Optional[str] = None, db: Session = Depends(get_db)):
+    # Create a base query
     query = db.query(DBItem)
+    
+    # Filter by category if provided
     if category:
         query = query.filter(DBItem.category == category)
+    
+    # Execute the query
     db_items = query.all()
     
     # Convert DB models to Pydantic models

@@ -16,6 +16,11 @@ function App() {
   const [error, setError] = useState(null);
   const [currentItem, setCurrentItem] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('');
+  
+  // Normalize category when setting it
+  const handleCategoryChange = (category) => {
+    setSelectedCategory(category);
+  };
   const [isLoading, setIsLoading] = useState(false);
 
   // Fetch Items
@@ -163,7 +168,7 @@ function App() {
               onEditItem={handleEditItem}
               onDeleteItem={handleDeleteItem}
               selectedCategory={selectedCategory}
-              onCategoryChange={setSelectedCategory}
+              onCategoryChange={handleCategoryChange}
             />
           )}
         </div>

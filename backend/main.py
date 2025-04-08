@@ -81,9 +81,12 @@ def get_items(category: Optional[str] = None, db: Session = Depends(get_db)):
     # Create a base query
     query = db.query(DBItem)
     
-    # Filter by category if provided
-    if category:
-        query = query.filter(DBItem.category == category)
+    # Filter by category if provided (case-insensitive)
+    if category and category.lower() != 'other':
+        query = query.filter(DBItem.category.ilike(category))
+    elif category and category.lower() == 'other':
+        # For "Other" category, get items with empty or null category
+        query = query.filter((DBItem.category == '') | (DBItem.category == None) | (DBItem.category == 'other') | (DBItem.category == 'Other'))
     
     # Execute the query
     db_items = query.all()

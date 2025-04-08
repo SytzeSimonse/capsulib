@@ -77,8 +77,11 @@ def read_root():
     return {"message": "Welcome to Capsulib API"}
 
 @app.get("/items", response_model=List[ItemResponse])
-def get_items(db: Session = Depends(get_db)):
-    db_items = db.query(DBItem).all()
+def get_items(category: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(DBItem)
+    if category:
+        query = query.filter(DBItem.category == category)
+    db_items = query.all()
     
     # Convert DB models to Pydantic models
     items = []

@@ -21,13 +21,17 @@ function App() {
   // Fetch Items
   const fetchItems = async () => {
     try {
+      setIsLoading(true);
       const response = await axios.get(`${API_URL}/items`, {
         params: selectedCategory ? { category: selectedCategory } : {}
-    });
+      });
       setItems(response.data);
+      setError(null);
     } catch (error) {
       setError('Error fetching items');
       console.error('Error:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 

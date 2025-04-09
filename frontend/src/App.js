@@ -20,7 +20,10 @@ function App() {
   const [currentItem, setCurrentItem] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
   const [syncStatus, setSyncStatus] = useState(db.getSyncStatus());
+  const [syncHandler, setSyncHandler] = useState(null);
+
   const [totalItemCount, setTotalItemCount] = useState(0);
   const [isDatabaseReady, setIsDatabaseReady] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -36,6 +39,51 @@ function App() {
     const handleOffline = () => {
       setIsOnline(false);
     };
+
+    const handleImportComplete = () => {
+      fetchItems();
+      setShowImportForm(false);
+    };
+  
+    const handleEditItem = (item) => {
+      setCurrentItem(item);
+      setShowItemForm(true);
+    };
+
+    // Add the new function here
+  const handleSyncWithRemote = async (userId = 'default-user') => {
+    try {
+      const remoteDbUrl = `http://localhost:5984/capsulib_${userId}`;
+      const remoteDb = new PouchDB(remoteDbUrl);
+      
+      // Set up two-way sync
+      const syncHandler = localDb.sync(remoteDb, {
+        live: true,
+        retry: true
+      }).on('change', (change) => {
+        console.log('Sync change:', change);
+        // You could update some state here to show changes
+      }).on('paused', () => {
+        console.log('Sync paused');
+        setSyncStatus('paused');
+      }).on('active', () => {
+        console.log('Sync active');
+        setSyncStatus('active');
+      }).on('error', (err) => {
+        console.error('Sync error:', err);
+        setSyncStatus('error');
+      });
+      
+      // Store the sync handler so we can cancel it later if needed
+      setSyncHandler(syncHandler);
+      return true;
+    } catch (error) {
+      console.error('Error setting up sync:', error);
+      setSyncStatus('error');
+      return false;
+    }
+  };
+
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -242,6 +290,19 @@ function App() {
       performBackgroundSync();
     }
   }, [isOnline, pendingOperations]);
+
+  // Add a new useEffect for sync
+  useEffect(() => {
+    // Start syncing when component mounts
+    handleSyncWithRemote();
+    
+    // Clean up sync when component unmounts
+    return () => {
+      if (syncHandler) {
+        syncHandler.cancel();
+      }
+    };
+  }, []); // Empty dependency array means this runs once on mount
 
   // Render loading or error state if database is not ready
   if (!isDatabaseReady) {

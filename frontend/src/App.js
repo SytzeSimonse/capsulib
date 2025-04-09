@@ -41,9 +41,7 @@ function App() {
     initializeDatabase();
   }, []);
 
-  // Rest of the existing code remains the same...
-  
-  // Fetch Items
+  // Fetch Items using local PouchDB
   const fetchItems = async () => {
     if (!isDatabaseReady) return;
 
@@ -56,7 +54,9 @@ function App() {
       
       // Then get filtered items if category is selected
       const filteredItems = selectedCategory 
-        ? await db.getItems(selectedCategory)
+        ? allItems.filter(item => 
+            item.category.toLowerCase() === selectedCategory.toLowerCase()
+          )
         : allItems;
         
       setItems(filteredItems);

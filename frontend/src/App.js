@@ -23,6 +23,61 @@ function App() {
   const [syncStatus, setSyncStatus] = useState(db.getSyncStatus());
   const [totalItemCount, setTotalItemCount] = useState(0);
   const [isDatabaseReady, setIsDatabaseReady] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingOperations, setPendingOperations] = useState([]);
+
+  // Connection status handlers
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      performBackgroundSync();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Background synchronization
+  const performBackgroundSync = async () => {
+    if (!isOnline || pendingOperations.length === 0) return;
+
+    try {
+      for (const operation of pendingOperations) {
+        switch (operation.type) {
+          case 'create':
+            await axios.post(`${API_URL}/items`, operation.item);
+            break;
+          case 'update':
+            await axios.put(`${API_URL}/items/${operation.item.id}`, operation.item);
+            break;
+          case 'delete':
+            await axios.delete(`${API_URL}/items/${operation.itemId}`);
+            break;
+        }
+      }
+      
+      // Clear pending operations after successful sync
+      setPendingOperations([]);
+    } catch (error) {
+      console.error('Background sync failed:', error);
+    }
+  };
+
+  // Add operation to pending queue if offline
+  const queueOperation = (operation) => {
+    if (!isOnline) {
+      setPendingOperations(prev => [...prev, operation]);
+    }
+  };
 
   // Initialize database on component mount
   useEffect(() => {
@@ -82,12 +137,15 @@ function App() {
       setTotalItemCount(prev => prev + 1);
       
       // If online, attempt to sync with server
-      if (navigator.onLine) {
+      if (isOnline) {
         try {
           await axios.post(`${API_URL}/items`, savedItem);
         } catch (syncError) {
           console.warn('Server sync failed, item saved locally', syncError);
+          queueOperation({ type: 'create', item: savedItem });
         }
+      } else {
+        queueOperation({ type: 'create', item: savedItem });
       }
       
       // Close the form
@@ -117,12 +175,15 @@ function App() {
       );
       
       // If online, attempt to sync with server
-      if (navigator.onLine) {
+      if (isOnline) {
         try {
           await axios.put(`${API_URL}/items/${savedItem.id}`, savedItem);
         } catch (syncError) {
           console.warn('Server sync failed, item updated locally', syncError);
+          queueOperation({ type: 'update', item: savedItem });
         }
+      } else {
+        queueOperation({ type: 'update', item: savedItem });
       }
       
       // Close the form
@@ -149,12 +210,15 @@ function App() {
       setTotalItemCount(prev => prev - 1);
       
       // If online, attempt to sync with server
-      if (navigator.onLine) {
+      if (isOnline) {
         try {
           await axios.delete(`${API_URL}/items/${itemId}`);
         } catch (syncError) {
           console.warn('Server sync failed, item deleted locally', syncError);
+          queueOperation({ type: 'delete', itemId });
         }
+      } else {
+        queueOperation({ type: 'delete', itemId });
       }
     } catch (error) {
       console.error('Error deleting item:', error);
@@ -171,6 +235,13 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCategory, isDatabaseReady]);
+
+  // Trigger background sync when online and pending operations exist
+  useEffect(() => {
+    if (isOnline && pendingOperations.length > 0) {
+      performBackgroundSync();
+    }
+  }, [isOnline, pendingOperations]);
 
   // Render loading or error state if database is not ready
   if (!isDatabaseReady) {
@@ -198,6 +269,8 @@ function App() {
         onSync={handleSyncWithRemote}
         onSyncOnce={handleSyncOnce}
         syncStatus={syncStatus}
+        isOnline={isOnline}
+        pendingOperations={pendingOperations}
       />
       
       {showItemForm && (

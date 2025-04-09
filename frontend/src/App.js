@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import * as db from './utils/db';
 import ItemList from './components/ItemList';
 import ItemForm from './components/ItemForm';
 import ImportForm from './components/ImportForm';
@@ -31,14 +32,15 @@ function App() {
       setIsLoading(true);
       
       // First, get total count of all items
-      const totalResponse = await axios.get(`${API_URL}/items`);
-      setTotalItemCount(totalResponse.data.length);
+      const allItems = await db.getItems();
+      setTotalItemCount(allItems.length);
       
       // Then get filtered items if category is selected
-      const response = await axios.get(`${API_URL}/items`, {
-        params: selectedCategory ? { category: selectedCategory } : {}
-      });
-      setItems(response.data);
+      const filteredItems = selectedCategory 
+        ? await db.getItems(selectedCategory)
+        : allItems;
+        
+      setItems(filteredItems);
       setError(null);
     } catch (error) {
       setError('Error fetching items');
@@ -56,7 +58,7 @@ function App() {
   
   const handleAddItem = async (itemData) => {
     try {
-      await axios.post(`${API_URL}/items`, itemData);
+      await db.createItem(itemData);
       fetchItems();
       setShowItemForm(false);
       setCurrentItem(null);
@@ -89,7 +91,7 @@ function App() {
         formattedData.purchase_date = new Date(formattedData.purchase_date).toISOString();
       }
 
-      await axios.put(`${API_URL}/items/${currentItem.id}`, formattedData);
+      await db.updateItem(currentItem.id, formattedData);
       fetchItems();
       setShowItemForm(false);
       setCurrentItem(null);
@@ -101,7 +103,7 @@ function App() {
 
   const handleDeleteItem = async (itemId) => {
     try {
-      await axios.delete(`${API_URL}/items/${itemId}`);
+      await db.deleteItem(itemId);
       fetchItems();
     } catch (error) {
       setError('Error deleting item');
@@ -112,8 +114,9 @@ function App() {
   const handleDeleteWardrobe = async () => {
     setIsLoading(true);
     try {
-      await axios.delete(`${API_URL}/items`);
+      await db.deleteAllItems();
       setItems([]);
+      setTotalItemCount(0);
       setShowDeleteConfirmation(false);
     } catch (error) {
       setError('Error deleting wardrobe');

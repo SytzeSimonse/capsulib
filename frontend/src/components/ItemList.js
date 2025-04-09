@@ -75,11 +75,19 @@ const ItemList = ({ items, onEditItem, onDeleteItem, selectedCategory, onCategor
             <div key={item.id} className="bg-white rounded-lg shadow overflow-hidden">
               <div className="h-48 bg-gray-200 flex items-center justify-center">
                 {item.images && item.images.length > 0 ? (
-                  <img
-                    src={`http://localhost:8000/uploads/${item.images[0]}`}
-                    alt={item.name}
-                    className="h-full w-full object-cover"
-                  />
+                  item.images[0].startsWith('http') || item.images[0].startsWith('data:') ? (
+                    <img
+                      src={item.images[0]}
+                      alt={item.name}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <img
+                      src={`http://localhost:8000/uploads/${item.images[0]}`}
+                      alt={item.name}
+                      className="h-full w-full object-cover"
+                    />
+                  )
                 ) : (
                   <div className="text-gray-400 text-center">No image</div>
                 )}

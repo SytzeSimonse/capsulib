@@ -1,20 +1,7 @@
-import PouchDB from 'pouchdb';
-import PouchDBFind from 'pouchdb-find';
-import PouchDBHttp from 'pouchdb-adapter-http';
+import dbService from '../services/DatabaseService';
 
-// Register plugins
-PouchDB.plugin(PouchDBFind);
-PouchDB.plugin(PouchDBHttp);
-
-// Initialize the database
-const db = new PouchDB('capsulib');
-
-// Create indexes for querying
-db.createIndex({
-  index: {
-    fields: ['category', 'name', 'brand', 'created_at']
-  }
-}).catch(err => console.error('Error creating index:', err));
+// Get the local database instance
+const db = dbService.getLocalDb();
 
 // Helper function to generate a unique ID
 const generateId = () => {
@@ -179,21 +166,41 @@ export const deleteAllItems = async () => {
 };
 
 // Sync with remote CouchDB server
-export const syncWithRemote = async (remoteUrl) => {
+export const syncWithRemote = async (remoteUrl, options = {}) => {
   try {
-    const remoteDb = new PouchDB(remoteUrl);
-    await db.sync(remoteDb, {
-      live: true,
-      retry: true
-    }).on('error', function (err) {
-      console.error('Sync error:', err);
+    const result = await dbService.connectToRemote(remoteUrl, {
+      autoSync: true,
+      live: options.live !== false,
+      retry: options.retry !== false,
+      ...options
     });
     
-    return { ok: true };
+    return { ok: result.success };
   } catch (error) {
     console.error('Error syncing with remote:', error);
     throw error;
   }
+};
+
+// Get sync status
+export const getSyncStatus = () => {
+  return dbService.getSyncStatus();
+};
+
+// Start sync
+export const startSync = (options = {}) => {
+  return dbService.startSync(options);
+};
+
+// Stop sync
+export const stopSync = () => {
+  return dbService.cancelSync();
+};
+
+// Perform one-time sync
+export const syncOnce = async () => {
+  const result = await dbService.syncOnce();
+  return { ok: result.success };
 };
 
 export default {
@@ -203,5 +210,9 @@ export default {
   updateItem,
   deleteItem,
   deleteAllItems,
-  syncWithRemote
+  syncWithRemote,
+  getSyncStatus,
+  startSync,
+  stopSync,
+  syncOnce
 };

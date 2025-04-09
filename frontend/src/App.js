@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import * as db from './utils/db';
+import dbService from './services/DatabaseService';
 import ItemList from './components/ItemList';
 import ItemForm from './components/ItemForm';
 import ImportForm from './components/ImportForm';
@@ -24,6 +25,9 @@ function App() {
   };
   const [isLoading, setIsLoading] = useState(false);
 
+  // Sync status
+  const [syncStatus, setSyncStatus] = useState(db.getSyncStatus());
+  
   // Fetch Items
   const [totalItemCount, setTotalItemCount] = useState(0);
 
@@ -55,6 +59,31 @@ function App() {
     fetchItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCategory]);
+  
+  // Set up event listeners for sync status
+  useEffect(() => {
+    const updateSyncStatus = () => {
+      setSyncStatus(db.getSyncStatus());
+    };
+    
+    // Listen for sync events
+    dbService.on('syncChange', updateSyncStatus);
+    dbService.on('syncPaused', updateSyncStatus);
+    dbService.on('syncActive', updateSyncStatus);
+    dbService.on('syncComplete', updateSyncStatus);
+    dbService.on('syncError', updateSyncStatus);
+    dbService.on('connectionChange', updateSyncStatus);
+    
+    // Clean up event listeners
+    return () => {
+      dbService.removeListener('syncChange', updateSyncStatus);
+      dbService.removeListener('syncPaused', updateSyncStatus);
+      dbService.removeListener('syncActive', updateSyncStatus);
+      dbService.removeListener('syncComplete', updateSyncStatus);
+      dbService.removeListener('syncError', updateSyncStatus);
+      dbService.removeListener('connectionChange', updateSyncStatus);
+    };
+  }, []);
   
   const handleAddItem = async (itemData) => {
     try {
@@ -136,6 +165,44 @@ function App() {
     setShowItemForm(true);
   };
 
+  // Handle sync with remote
+  const handleSyncWithRemote = async () => {
+    try {
+      const remoteUrl = prompt("Enter CouchDB URL (e.g., http://localhost:5984/capsulib)");
+      if (!remoteUrl) return;
+      
+      setIsLoading(true);
+      const result = await db.syncWithRemote(remoteUrl);
+      if (result.ok) {
+        alert("Successfully connected to remote database");
+      } else {
+        setError("Failed to connect to remote database");
+      }
+    } catch (error) {
+      setError(`Error connecting to remote: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Handle one-time sync
+  const handleSyncOnce = async () => {
+    try {
+      setIsLoading(true);
+      const result = await db.syncOnce();
+      if (result.ok) {
+        alert("Sync completed successfully");
+        fetchItems(); // Refresh items after sync
+      } else {
+        setError("Sync failed");
+      }
+    } catch (error) {
+      setError(`Sync error: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
   return (
     <div className="min-h-screen bg-gray-100">
       <Header 
@@ -146,6 +213,9 @@ function App() {
         onExport={() => {/* TODO: Implement export */}}
         onImport={() => setShowImportForm(true)}
         onDeleteWardrobe={() => setShowDeleteConfirmation(true)}
+        onSync={handleSyncWithRemote}
+        onSyncOnce={handleSyncOnce}
+        syncStatus={syncStatus}
       />
       
       <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">

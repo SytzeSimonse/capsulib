@@ -50,41 +50,6 @@ function App() {
       setShowItemForm(true);
     };
 
-    // Add the new function here
-  const handleSyncWithRemote = async (userId = 'default-user') => {
-    try {
-      const remoteDbUrl = `http://localhost:5984/capsulib_${userId}`;
-      const remoteDb = new PouchDB(remoteDbUrl);
-      
-      // Set up two-way sync
-      const syncHandler = localDb.sync(remoteDb, {
-        live: true,
-        retry: true
-      }).on('change', (change) => {
-        console.log('Sync change:', change);
-        // You could update some state here to show changes
-      }).on('paused', () => {
-        console.log('Sync paused');
-        setSyncStatus('paused');
-      }).on('active', () => {
-        console.log('Sync active');
-        setSyncStatus('active');
-      }).on('error', (err) => {
-        console.error('Sync error:', err);
-        setSyncStatus('error');
-      });
-      
-      // Store the sync handler so we can cancel it later if needed
-      setSyncHandler(syncHandler);
-      return true;
-    } catch (error) {
-      console.error('Error setting up sync:', error);
-      setSyncStatus('error');
-      return false;
-    }
-  };
-
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
@@ -290,6 +255,51 @@ function App() {
       performBackgroundSync();
     }
   }, [isOnline, pendingOperations]);
+
+  // Function to handle syncing with remote database
+  const handleSyncWithRemote = async (userId = 'default-user') => {
+    try {
+      const remoteDbUrl = `http://localhost:5984/capsulib_${userId}`;
+      const remoteDb = new PouchDB(remoteDbUrl);
+      
+      // Set up two-way sync
+      const syncHandler = db.getLocalDb().sync(remoteDb, {
+        live: true,
+        retry: true
+      }).on('change', (change) => {
+        console.log('Sync change:', change);
+        // You could update some state here to show changes
+      }).on('paused', () => {
+        console.log('Sync paused');
+        setSyncStatus('paused');
+      }).on('active', () => {
+        console.log('Sync active');
+        setSyncStatus('active');
+      }).on('error', (err) => {
+        console.error('Sync error:', err);
+        setSyncStatus('error');
+      });
+      
+      // Store the sync handler so we can cancel it later if needed
+      setSyncHandler(syncHandler);
+      return true;
+    } catch (error) {
+      console.error('Error setting up sync:', error);
+      setSyncStatus('error');
+      return false;
+    }
+  };
+
+  // Function to handle one-time sync
+  const handleSyncOnce = async () => {
+    try {
+      const result = await db.syncOnce();
+      return result.ok;
+    } catch (error) {
+      console.error('Error during one-time sync:', error);
+      return false;
+    }
+  };
 
   // Add a new useEffect for sync
   useEffect(() => {

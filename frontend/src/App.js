@@ -69,6 +69,38 @@ function App() {
     }
   };
 
+  // Add Item Handler
+  const handleAddItem = async (newItem) => {
+    try {
+      setIsLoading(true);
+      
+      // First, save to local PouchDB
+      const savedItem = await db.createItem(newItem);
+      
+      // Update local state
+      setItems(prevItems => [...prevItems, savedItem]);
+      setTotalItemCount(prev => prev + 1);
+      
+      // If online, attempt to sync with server
+      if (navigator.onLine) {
+        try {
+          await axios.post(`${API_URL}/items`, savedItem);
+        } catch (syncError) {
+          console.warn('Server sync failed, item saved locally', syncError);
+        }
+      }
+      
+      // Close the form
+      setShowItemForm(false);
+      setCurrentItem(null);
+    } catch (error) {
+      console.error('Error adding item:', error);
+      setError('Failed to add item');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Modify existing useEffect to check database readiness
   useEffect(() => {
     if (isDatabaseReady) {
@@ -90,7 +122,6 @@ function App() {
     );
   }
 
-  // Rest of the component remains the same...
   return (
     <div className="min-h-screen bg-gray-100">
       <Header 
@@ -105,6 +136,14 @@ function App() {
         onSyncOnce={handleSyncOnce}
         syncStatus={syncStatus}
       />
+      
+      {showItemForm && (
+        <ItemForm 
+          item={currentItem}
+          onSubmit={handleAddItem}
+          onClose={() => setShowItemForm(false)}
+        />
+      )}
       
       {/* Rest of the existing return remains the same */}
     </div>

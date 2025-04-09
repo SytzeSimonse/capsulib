@@ -136,6 +136,34 @@ function App() {
     }
   };
 
+  // Delete Item Handler
+  const handleDeleteItem = async (itemId) => {
+    try {
+      setIsLoading(true);
+      
+      // First, delete from local PouchDB
+      await db.deleteItem(itemId);
+      
+      // Update local state
+      setItems(prevItems => prevItems.filter(item => item.id !== itemId));
+      setTotalItemCount(prev => prev - 1);
+      
+      // If online, attempt to sync with server
+      if (navigator.onLine) {
+        try {
+          await axios.delete(`${API_URL}/items/${itemId}`);
+        } catch (syncError) {
+          console.warn('Server sync failed, item deleted locally', syncError);
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting item:', error);
+      setError('Failed to delete item');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Modify existing useEffect to check database readiness
   useEffect(() => {
     if (isDatabaseReady) {

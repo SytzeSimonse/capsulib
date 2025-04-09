@@ -40,16 +40,6 @@ function App() {
       setIsOnline(false);
     };
 
-    const handleImportComplete = () => {
-      fetchItems();
-      setShowImportForm(false);
-    };
-  
-    const handleEditItem = (item) => {
-      setCurrentItem(item);
-      setShowItemForm(true);
-    };
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
@@ -298,6 +288,43 @@ function App() {
     } catch (error) {
       console.error('Error during one-time sync:', error);
       return false;
+    }
+  };
+  
+  // Function to handle import completion
+  const handleImportComplete = () => {
+    fetchItems();
+    setShowImportForm(false);
+  };
+  
+  // Function to handle wardrobe deletion
+  const handleDeleteWardrobe = async () => {
+    try {
+      setIsLoading(true);
+      
+      // Delete all items from local PouchDB
+      await db.deleteAllItems();
+      
+      // Update local state
+      setItems([]);
+      setTotalItemCount(0);
+      
+      // Close the confirmation dialog
+      setShowDeleteConfirmation(false);
+      
+      // If online, attempt to sync with server
+      if (isOnline) {
+        try {
+          await axios.delete(`${API_URL}/items`);
+        } catch (syncError) {
+          console.warn('Server sync failed, items deleted locally', syncError);
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting wardrobe:', error);
+      setError('Failed to delete wardrobe');
+    } finally {
+      setIsLoading(false);
     }
   };
 

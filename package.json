@@ -23,6 +23,11 @@
     "url": "https://github.com/SytzeSimonse/capsulib/issues"
   },
   "homepage": "https://github.com/SytzeSimonse/capsulib#readme",
+  "dependencies": {
+    "pouchdb": "^8.0.1",
+    "pouchdb-find": "^8.0.1",
+    "pouchdb-adapter-http": "^8.0.1"
+  },
   "devDependencies": {
     "concurrently": "^8.2.0"
   }

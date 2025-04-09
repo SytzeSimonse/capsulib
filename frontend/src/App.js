@@ -101,6 +101,41 @@ function App() {
     }
   };
 
+  // Update Item Handler
+  const handleUpdateItem = async (updatedItem) => {
+    try {
+      setIsLoading(true);
+      
+      // First, update in local PouchDB
+      const savedItem = await db.updateItem(updatedItem.id, updatedItem);
+      
+      // Update local state
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === savedItem.id ? savedItem : item
+        )
+      );
+      
+      // If online, attempt to sync with server
+      if (navigator.onLine) {
+        try {
+          await axios.put(`${API_URL}/items/${savedItem.id}`, savedItem);
+        } catch (syncError) {
+          console.warn('Server sync failed, item updated locally', syncError);
+        }
+      }
+      
+      // Close the form
+      setShowItemForm(false);
+      setCurrentItem(null);
+    } catch (error) {
+      console.error('Error updating item:', error);
+      setError('Failed to update item');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Modify existing useEffect to check database readiness
   useEffect(() => {
     if (isDatabaseReady) {
@@ -140,12 +175,39 @@ function App() {
       {showItemForm && (
         <ItemForm 
           item={currentItem}
-          onSubmit={handleAddItem}
+          onSubmit={currentItem ? handleUpdateItem : handleAddItem}
           onClose={() => setShowItemForm(false)}
         />
       )}
       
-      {/* Rest of the existing return remains the same */}
+      <ItemList 
+        items={items}
+        onEditItem={(item) => {
+          setCurrentItem(item);
+          setShowItemForm(true);
+        }}
+        onDeleteItem={handleDeleteItem}
+        selectedCategory={selectedCategory}
+        onCategoryChange={setSelectedCategory}
+        totalItemCount={totalItemCount}
+      />
+      
+      {showImportForm && (
+        <ImportForm 
+          onClose={() => setShowImportForm(false)}
+          onImportComplete={handleImportComplete}
+        />
+      )}
+      
+      {showDeleteConfirmation && (
+        <ConfirmationDialog 
+          isOpen={showDeleteConfirmation}
+          onClose={() => setShowDeleteConfirmation(false)}
+          onConfirm={handleDeleteWardrobe}
+          title="Delete Entire Wardrobe"
+          message="Are you sure you want to delete all items in your wardrobe? This action cannot be undone."
+        />
+      )}
     </div>
   );
 }

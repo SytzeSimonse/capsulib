@@ -263,7 +263,7 @@ function App() {
       const remoteDb = new PouchDB(remoteDbUrl);
       
       // Set up two-way sync
-      const syncHandler = db.getLocalDb().sync(remoteDb, {
+      const syncHandler = dbService.getLocalDb().sync(remoteDb, {
         live: true,
         retry: true
       }).on('change', (change) => {

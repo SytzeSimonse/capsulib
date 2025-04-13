@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import PouchDB from 'pouchdb';
+import * as db from './utils/db';
+import dbService from './services/DatabaseService';
 import ItemList from './components/ItemList';
 import ItemForm from './components/ItemForm';
 import ImportForm from './components/ImportForm';
@@ -13,102 +16,343 @@ function App() {
   const [showItemForm, setShowItemForm] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentItem, setCurrentItem] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const fetchItems = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/items`);
-      setItems(response.data);
-    } catch (error) {
-      setError('Error fetching items');
-      console.error('Error:', error);
-    }
-  };
+  const [syncStatus, setSyncStatus] = useState(db.getSyncStatus());
+  const [syncHandler, setSyncHandler] = useState(null);
 
+  const [totalItemCount, setTotalItemCount] = useState(0);
+  const [isDatabaseReady, setIsDatabaseReady] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingOperations, setPendingOperations] = useState([]);
+
+  // Connection status handlers
   useEffect(() => {
-    fetchItems();
+    const handleOnline = () => {
+      setIsOnline(true);
+      performBackgroundSync();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
-  const handleAddItem = async (itemData) => {
-    try {
-      await axios.post(`${API_URL}/items`, itemData);
-      fetchItems();
-      setShowItemForm(false);
-      setCurrentItem(null);
-    } catch (error) {
-      setError('Error adding item');
-      console.error('Error:', error);
-    }
-  };
+  // Background synchronization
+  const performBackgroundSync = async () => {
+    if (!isOnline || pendingOperations.length === 0) return;
 
-  const handleUpdateItem = async (itemData) => {
     try {
-      // Create a copy of the data to modify
-      const formattedData = { ...itemData };
-      
-      // Convert empty strings to null or appropriate default values
-      Object.keys(formattedData).forEach(key => {
-        if (formattedData[key] === '') {
-          if (key === 'colors' || key === 'materials') {
-            formattedData[key] = [];
-          } else if (key === 'is_second_hand') {
-            formattedData[key] = false;
-          } else {
-            formattedData[key] = null;
-          }
+      for (const operation of pendingOperations) {
+        switch (operation.type) {
+          case 'create':
+            await axios.post(`${API_URL}/items`, operation.item);
+            break;
+          case 'update':
+            await axios.put(`${API_URL}/items/${operation.item.id}`, operation.item);
+            break;
+          case 'delete':
+            await axios.delete(`${API_URL}/items/${operation.itemId}`);
+            break;
         }
-      });
-
-      // If purchase_date is not empty, ensure it's in ISO format
-      if (formattedData.purchase_date) {
-        formattedData.purchase_date = new Date(formattedData.purchase_date).toISOString();
       }
-
-      await axios.put(`${API_URL}/items/${currentItem.id}`, formattedData);
-      fetchItems();
-      setShowItemForm(false);
-      setCurrentItem(null);
+      
+      // Clear pending operations after successful sync
+      setPendingOperations([]);
     } catch (error) {
-      setError('Error updating item');
-      console.error('Error:', error);
+      console.error('Background sync failed:', error);
     }
   };
 
-  const handleDeleteItem = async (itemId) => {
-    try {
-      await axios.delete(`${API_URL}/items/${itemId}`);
-      fetchItems();
-    } catch (error) {
-      setError('Error deleting item');
-      console.error('Error:', error);
+  // Add operation to pending queue if offline
+  const queueOperation = (operation) => {
+    if (!isOnline) {
+      setPendingOperations(prev => [...prev, operation]);
     }
   };
 
-  const handleDeleteWardrobe = async () => {
-    setIsLoading(true);
+  // Initialize database on component mount
+  useEffect(() => {
+    const initializeDatabase = async () => {
+      try {
+        // Ensure PouchDB is properly initialized in the utils/db module
+        await db.getItems();
+        setIsDatabaseReady(true);
+      } catch (error) {
+        console.error('Database initialization error:', error);
+        setError('Failed to initialize local database');
+        setIsDatabaseReady(false);
+      }
+    };
+
+    initializeDatabase();
+  }, []);
+
+  // Fetch Items using local PouchDB
+  const fetchItems = async () => {
+    if (!isDatabaseReady) return;
+
     try {
-      await axios.delete(`${API_URL}/items`);
-      setItems([]);
-      setShowDeleteConfirmation(false);
+      setIsLoading(true);
+      
+      // First, get total count of all items
+      const allItems = await db.getItems();
+      setTotalItemCount(allItems.length);
+      
+      // Then get filtered items if category is selected
+      const filteredItems = selectedCategory 
+        ? allItems.filter(item => 
+            item.category.toLowerCase() === selectedCategory.toLowerCase()
+          )
+        : allItems;
+        
+      setItems(filteredItems);
+      setError(null);
     } catch (error) {
-      setError('Error deleting wardrobe');
+      setError('Error fetching items');
       console.error('Error:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Add Item Handler
+  const handleAddItem = async (newItem) => {
+    try {
+      setIsLoading(true);
+      
+      // First, save to local PouchDB
+      const savedItem = await db.createItem(newItem);
+      
+      // Update local state
+      setItems(prevItems => [...prevItems, savedItem]);
+      setTotalItemCount(prev => prev + 1);
+      
+      // If online, attempt to sync with server
+      if (isOnline) {
+        try {
+          await axios.post(`${API_URL}/items`, savedItem);
+        } catch (syncError) {
+          console.warn('Server sync failed, item saved locally', syncError);
+          queueOperation({ type: 'create', item: savedItem });
+        }
+      } else {
+        queueOperation({ type: 'create', item: savedItem });
+      }
+      
+      // Close the form
+      setShowItemForm(false);
+      setCurrentItem(null);
+    } catch (error) {
+      console.error('Error adding item:', error);
+      setError('Failed to add item');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Update Item Handler
+  const handleUpdateItem = async (updatedItem) => {
+    try {
+      setIsLoading(true);
+      
+      // First, update in local PouchDB
+      const savedItem = await db.updateItem(updatedItem.id, updatedItem);
+      
+      // Update local state
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === savedItem.id ? savedItem : item
+        )
+      );
+      
+      // If online, attempt to sync with server
+      if (isOnline) {
+        try {
+          await axios.put(`${API_URL}/items/${savedItem.id}`, savedItem);
+        } catch (syncError) {
+          console.warn('Server sync failed, item updated locally', syncError);
+          queueOperation({ type: 'update', item: savedItem });
+        }
+      } else {
+        queueOperation({ type: 'update', item: savedItem });
+      }
+      
+      // Close the form
+      setShowItemForm(false);
+      setCurrentItem(null);
+    } catch (error) {
+      console.error('Error updating item:', error);
+      setError('Failed to update item');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Delete Item Handler
+  const handleDeleteItem = async (itemId) => {
+    try {
+      setIsLoading(true);
+      
+      // First, delete from local PouchDB
+      await db.deleteItem(itemId);
+      
+      // Update local state
+      setItems(prevItems => prevItems.filter(item => item.id !== itemId));
+      setTotalItemCount(prev => prev - 1);
+      
+      // If online, attempt to sync with server
+      if (isOnline) {
+        try {
+          await axios.delete(`${API_URL}/items/${itemId}`);
+        } catch (syncError) {
+          console.warn('Server sync failed, item deleted locally', syncError);
+          queueOperation({ type: 'delete', itemId });
+        }
+      } else {
+        queueOperation({ type: 'delete', itemId });
+      }
+    } catch (error) {
+      console.error('Error deleting item:', error);
+      setError('Failed to delete item');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Modify existing useEffect to check database readiness
+  useEffect(() => {
+    if (isDatabaseReady) {
+      fetchItems();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCategory, isDatabaseReady]);
+
+  // Trigger background sync when online and pending operations exist
+  useEffect(() => {
+    if (isOnline && pendingOperations.length > 0) {
+      performBackgroundSync();
+    }
+  }, [isOnline, pendingOperations]);
+
+  // Function to handle syncing with remote database
+  const handleSyncWithRemote = async (userId = 'default-user') => {
+    try {
+      const remoteDbUrl = `http://localhost:5984/capsulib_${userId}`;
+      const remoteDb = new PouchDB(remoteDbUrl);
+      
+      // Set up two-way sync
+      const syncHandler = dbService.getLocalDb().sync(remoteDb, {
+        live: true,
+        retry: true
+      }).on('change', (change) => {
+        console.log('Sync change:', change);
+        // You could update some state here to show changes
+      }).on('paused', () => {
+        console.log('Sync paused');
+        setSyncStatus('paused');
+      }).on('active', () => {
+        console.log('Sync active');
+        setSyncStatus('active');
+      }).on('error', (err) => {
+        console.error('Sync error:', err);
+        setSyncStatus('error');
+      });
+      
+      // Store the sync handler so we can cancel it later if needed
+      setSyncHandler(syncHandler);
+      return true;
+    } catch (error) {
+      console.error('Error setting up sync:', error);
+      setSyncStatus('error');
+      return false;
+    }
+  };
+
+  // Function to handle one-time sync
+  const handleSyncOnce = async () => {
+    try {
+      const result = await db.syncOnce();
+      return result.ok;
+    } catch (error) {
+      console.error('Error during one-time sync:', error);
+      return false;
+    }
+  };
+  
+  // Function to handle import completion
   const handleImportComplete = () => {
     fetchItems();
     setShowImportForm(false);
   };
-
-  const handleEditItem = (item) => {
-    setCurrentItem(item);
-    setShowItemForm(true);
+  
+  // Function to handle wardrobe deletion
+  const handleDeleteWardrobe = async () => {
+    try {
+      setIsLoading(true);
+      
+      // Delete all items from local PouchDB
+      await db.deleteAllItems();
+      
+      // Update local state
+      setItems([]);
+      setTotalItemCount(0);
+      
+      // Close the confirmation dialog
+      setShowDeleteConfirmation(false);
+      
+      // If online, attempt to sync with server
+      if (isOnline) {
+        try {
+          await axios.delete(`${API_URL}/items`);
+        } catch (syncError) {
+          console.warn('Server sync failed, items deleted locally', syncError);
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting wardrobe:', error);
+      setError('Failed to delete wardrobe');
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  // Add a new useEffect for sync
+  useEffect(() => {
+    // Start syncing when component mounts
+    handleSyncWithRemote();
+    
+    // Clean up sync when component unmounts
+    return () => {
+      if (syncHandler) {
+        syncHandler.cancel();
+      }
+    };
+  }, []); // Empty dependency array means this runs once on mount
+
+  // Render loading or error state if database is not ready
+  if (!isDatabaseReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        {error ? (
+          <div className="text-red-500">{error}</div>
+        ) : (
+          <div>Loading database...</div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -120,50 +364,49 @@ function App() {
         onExport={() => {/* TODO: Implement export */}}
         onImport={() => setShowImportForm(true)}
         onDeleteWardrobe={() => setShowDeleteConfirmation(true)}
+        onSync={handleSyncWithRemote}
+        onSyncOnce={handleSyncOnce}
+        syncStatus={syncStatus}
+        isOnline={isOnline}
+        pendingOperations={pendingOperations}
       />
       
-      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
-          {error && (
-            <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
-              {error}
-            </div>
-          )}
-
-          {showItemForm ? (
-            <ItemForm
-              item={currentItem}
-              onClose={() => {
-                setShowItemForm(false);
-                setCurrentItem(null);
-              }}
-              onSubmit={currentItem 
-                ? (itemData) => handleUpdateItem(itemData)
-                : handleAddItem
-              }
-            />
-          ) : showImportForm ? (
-            <ImportForm
-              onClose={() => setShowImportForm(false)}
-              onImportComplete={handleImportComplete}
-            />
-          ) : (
-            <ItemList
-              items={items}
-              onEditItem={handleEditItem}
-              onDeleteItem={handleDeleteItem}
-            />
-          )}
-        </div>
-      </div>
-
-      <ConfirmationDialog
-        isOpen={showDeleteConfirmation}
-        onClose={() => setShowDeleteConfirmation(false)}
-        onConfirm={handleDeleteWardrobe}
-        title="Delete Wardrobe"
-        message="Are you sure you want to delete all items in your wardrobe? This action cannot be undone."
+      {showItemForm && (
+        <ItemForm 
+          item={currentItem}
+          onSubmit={currentItem ? handleUpdateItem : handleAddItem}
+          onClose={() => setShowItemForm(false)}
+        />
+      )}
+      
+      <ItemList 
+        items={items}
+        onEditItem={(item) => {
+          setCurrentItem(item);
+          setShowItemForm(true);
+        }}
+        onDeleteItem={handleDeleteItem}
+        selectedCategory={selectedCategory}
+        onCategoryChange={setSelectedCategory}
+        totalItemCount={totalItemCount}
       />
+      
+      {showImportForm && (
+        <ImportForm 
+          onClose={() => setShowImportForm(false)}
+          onImportComplete={handleImportComplete}
+        />
+      )}
+      
+      {showDeleteConfirmation && (
+        <ConfirmationDialog 
+          isOpen={showDeleteConfirmation}
+          onClose={() => setShowDeleteConfirmation(false)}
+          onConfirm={handleDeleteWardrobe}
+          title="Delete Entire Wardrobe"
+          message="Are you sure you want to delete all items in your wardrobe? This action cannot be undone."
+        />
+      )}
     </div>
   );
 }

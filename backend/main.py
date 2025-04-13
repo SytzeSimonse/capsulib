@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Query, Fo
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import os
 import uuid
@@ -11,13 +11,35 @@ import shutil
 import io
 import csv
 import zipfile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 
 from pydantic import BaseModel
 from database import get_db, Item as DBItem, Color as DBColor, Image as DBImage, Material as DBMaterial
 import json
+import couchdb
 
 app = FastAPI(title="Capsulib API", description="Manage your capsule wardrobe")
+
+# CouchDB configuration
+COUCHDB_URL = os.environ.get("COUCHDB_URL", "http://localhost:5984")
+COUCHDB_USER = os.environ.get("COUCHDB_USER", "admin")
+COUCHDB_PASSWORD = os.environ.get("COUCHDB_PASSWORD", "password")
+COUCHDB_DB = os.environ.get("COUCHDB_DB", "capsulib")
+
+# Initialize CouchDB connection
+try:
+    couch_server = couchdb.Server(COUCHDB_URL)
+    if COUCHDB_USER and COUCHDB_PASSWORD:
+        couch_server.resource.credentials = (COUCHDB_USER, COUCHDB_PASSWORD)
+    
+    # Create database if it doesn't exist
+    if COUCHDB_DB not in couch_server:
+        couch_db = couch_server.create(COUCHDB_DB)
+    else:
+        couch_db = couch_server[COUCHDB_DB]
+except Exception as e:
+    print(f"Warning: Could not connect to CouchDB: {e}")
+    couch_db = None
 
 # Enable CORS for development
 app.add_middleware(
@@ -56,7 +78,6 @@ class ItemBase(BaseModel):
     season: Optional[str] = None
     is_second_hand: Optional[bool] = False
     pattern: Optional[str] = None
-    url: Optional[str] = None
 
 class ItemResponse(ItemBase):
     id: int
@@ -73,13 +94,121 @@ class ImportPreviewResponse(BaseModel):
     available_fields: List[str]
     required_fields: List[str]
 
+# Models for CouchDB sync
+class SyncRequest(BaseModel):
+    docs: List[Dict[str, Any]]
+    last_seq: Optional[str] = None
+
+class SyncResponse(BaseModel):
+    ok: bool
+    docs: List[Dict[str, Any]]
+    last_seq: str
+
+# Helper functions for CouchDB operations
+def sql_to_couch_doc(db_item):
+    """Convert a SQLAlchemy item to a CouchDB document"""
+    doc = {
+        "_id": str(db_item.id),
+        "type": "item",
+        "brand": db_item.brand,
+        "name": db_item.name,
+        "category": db_item.category,
+        "colors": [color.name for color in db_item.colors],
+        "materials": [material.name for material in db_item.materials],
+        "size": db_item.size,
+        "purchase_date": db_item.purchase_date.isoformat() if db_item.purchase_date else None,
+        "purchase_price": db_item.purchase_price,
+        "condition": db_item.condition,
+        "description": db_item.description,
+        "season": db_item.season,
+        "is_second_hand": db_item.is_second_hand,
+        "pattern": db_item.pattern,
+        "images": [image.filename for image in db_item.images],
+        "created_at": db_item.created_at.isoformat(),
+        "updated_at": db_item.updated_at.isoformat()
+    }
+    return doc
+
+def couch_to_sql_item(doc, db):
+    """Convert a CouchDB document to a SQLAlchemy item"""
+    # Check if item already exists
+    item_id = int(doc["_id"]) if doc["_id"].isdigit() else None
+    if item_id:
+        db_item = db.query(DBItem).filter(DBItem.id == item_id).first()
+    else:
+        db_item = None
+    
+    # Create new item if it doesn't exist
+    if not db_item:
+        db_item = DBItem(
+            brand=doc.get("brand", ""),
+            name=doc.get("name", ""),
+            category=doc.get("category", ""),
+            size=doc.get("size", ""),
+            purchase_date=datetime.fromisoformat(doc["purchase_date"]) if doc.get("purchase_date") else None,
+            purchase_price=doc.get("purchase_price"),
+            condition=doc.get("condition"),
+            description=doc.get("description"),
+            season=doc.get("season"),
+            is_second_hand=doc.get("is_second_hand", False),
+            pattern=doc.get("pattern")
+        )
+        db.add(db_item)
+        db.flush()  # Get the ID
+    else:
+        # Update existing item
+        db_item.brand = doc.get("brand", "")
+        db_item.name = doc.get("name", "")
+        db_item.category = doc.get("category", "")
+        db_item.size = doc.get("size", "")
+        db_item.purchase_date = datetime.fromisoformat(doc["purchase_date"]) if doc.get("purchase_date") else None
+        db_item.purchase_price = doc.get("purchase_price")
+        db_item.condition = doc.get("condition")
+        db_item.description = doc.get("description")
+        db_item.season = doc.get("season")
+        db_item.is_second_hand = doc.get("is_second_hand", False)
+        db_item.pattern = doc.get("pattern")
+    
+    # Handle colors
+    db_item.colors = []
+    for color_name in doc.get("colors", []):
+        color = db.query(DBColor).filter(DBColor.name == color_name).first()
+        if not color:
+            color = DBColor(name=color_name)
+            db.add(color)
+            db.flush()
+        db_item.colors.append(color)
+    
+    # Handle materials
+    db_item.materials = []
+    for material_name in doc.get("materials", []):
+        material = db.query(DBMaterial).filter(DBMaterial.name == material_name).first()
+        if not material:
+            material = DBMaterial(name=material_name)
+            db.add(material)
+            db.flush()
+        db_item.materials.append(material)
+    
+    return db_item
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Capsulib API"}
 
 @app.get("/items", response_model=List[ItemResponse])
-def get_items(db: Session = Depends(get_db)):
-    db_items = db.query(DBItem).all()
+def get_items(category: Optional[str] = None, db: Session = Depends(get_db)):
+    # Create a base query
+    query = db.query(DBItem)
+    
+    # Filter by category if provided (case-insensitive)
+    if category and category.lower() != 'other':
+        query = query.filter(DBItem.category.ilike(category))
+    elif category and category.lower() == 'other':
+        # For "Other" category, get items with empty or null category
+        query = query.filter((DBItem.category == '') | (DBItem.category == None) | (DBItem.category == 'other') | (DBItem.category == 'Other'))
+    
+    # Execute the query
+    db_items = query.all()
     
     # Convert DB models to Pydantic models
     items = []
@@ -195,6 +324,14 @@ def create_item(item: ItemBase, db: Session = Depends(get_db)):
         "updated_at": db_item.updated_at
     }
     
+    # Also save to CouchDB if available
+    if couch_db:
+        try:
+            couch_doc = sql_to_couch_doc(db_item)
+            couch_db.save(couch_doc)
+        except Exception as e:
+            print(f"Warning: Could not save to CouchDB: {e}")
+    
     return item_dict
 
 @app.put("/items/{item_id}", response_model=ItemResponse)
@@ -261,6 +398,22 @@ def update_item(item_id: int, updated_item: ItemBase, db: Session = Depends(get_
         "updated_at": db_item.updated_at
     }
     
+    # Also update in CouchDB if available
+    if couch_db:
+        try:
+            couch_doc = sql_to_couch_doc(db_item)
+            # Check if document exists in CouchDB
+            try:
+                existing_doc = couch_db.get(couch_doc["_id"])
+                if existing_doc:
+                    couch_doc["_rev"] = existing_doc["_rev"]
+            except couchdb.http.ResourceNotFound:
+                pass
+            
+            couch_db.save(couch_doc)
+        except Exception as e:
+            print(f"Warning: Could not update in CouchDB: {e}")
+    
     return item_dict
 
 @app.delete("/items/{item_id}")
@@ -281,6 +434,18 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
     # Delete from database
     db.delete(db_item)
     db.commit()
+    
+    # Also delete from CouchDB if available
+    if couch_db:
+        try:
+            doc_id = str(item_id)
+            try:
+                doc = couch_db.get(doc_id)
+                couch_db.delete(doc)
+            except couchdb.http.ResourceNotFound:
+                pass  # Document doesn't exist in CouchDB
+        except Exception as e:
+            print(f"Warning: Could not delete from CouchDB: {e}")
     
     return {"message": "Item deleted successfully"}
 
@@ -649,10 +814,158 @@ def delete_all_items(db: Session = Depends(get_db)):
         db.query(DBItem).delete()
         db.commit()
         
+        # Also delete all items from CouchDB if available
+        if couch_db:
+            try:
+                # Get all item documents
+                items_view = couch_db.view('_all_docs', include_docs=True)
+                for row in items_view:
+                    doc = row.doc
+                    if doc.get('type') == 'item':
+                        couch_db.delete(doc)
+            except Exception as e:
+                print(f"Warning: Could not delete all items from CouchDB: {e}")
+        
         return {"message": "All items deleted successfully"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Error deleting items: {str(e)}")
+
+# CouchDB sync endpoints
+@app.get("/sync/info")
+def get_sync_info():
+    """Get CouchDB sync information"""
+    if not couch_db:
+        raise HTTPException(status_code=503, detail="CouchDB is not available")
+    
+    try:
+        info = couch_db.info()
+        return {
+            "ok": True,
+            "db_name": info.get("db_name"),
+            "doc_count": info.get("doc_count"),
+            "update_seq": info.get("update_seq"),
+            "sizes": info.get("sizes")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting CouchDB info: {str(e)}")
+
+@app.post("/sync/pull")
+def sync_pull(request: SyncRequest, db: Session = Depends(get_db)):
+    """Pull changes from the server to the client"""
+    if not couch_db:
+        raise HTTPException(status_code=503, detail="CouchDB is not available")
+    
+    try:
+        # Get all items from SQL database
+        db_items = db.query(DBItem).all()
+        
+        # Convert to CouchDB documents
+        docs = [sql_to_couch_doc(item) for item in db_items]
+        
+        # Get the latest sequence number
+        info = couch_db.info()
+        last_seq = info.get("update_seq", "0")
+        
+        return {
+            "ok": True,
+            "docs": docs,
+            "last_seq": last_seq
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during sync pull: {str(e)}")
+
+@app.post("/sync/push")
+def sync_push(request: SyncRequest, db: Session = Depends(get_db)):
+    """Push changes from the client to the server"""
+    if not couch_db:
+        raise HTTPException(status_code=503, detail="CouchDB is not available")
+    
+    try:
+        # Process each document from the client
+        for doc in request.docs:
+            # Skip design documents and other non-item documents
+            if doc.get("_id", "").startswith("_design/") or doc.get("type") != "item":
+                continue
+            
+            # Convert to SQL item and save
+            couch_to_sql_item(doc, db)
+            
+            # Also save to CouchDB
+            try:
+                existing_doc = couch_db.get(doc["_id"])
+                if existing_doc:
+                    doc["_rev"] = existing_doc["_rev"]
+                couch_db.save(doc)
+            except couchdb.http.ResourceNotFound:
+                couch_db.save(doc)
+        
+        db.commit()
+        
+        # Get the latest sequence number
+        info = couch_db.info()
+        last_seq = info.get("update_seq", "0")
+        
+        return {
+            "ok": True,
+            "docs": [],  # No need to return docs for push
+            "last_seq": last_seq
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error during sync push: {str(e)}")
+
+@app.post("/sync/changes")
+def get_changes(request: Dict[str, Any]):
+    """Get changes since a specific sequence number"""
+    if not couch_db:
+        raise HTTPException(status_code=503, detail="CouchDB is not available")
+    
+    try:
+        since = request.get("since", "0")
+        limit = request.get("limit", 100)
+        
+        changes = couch_db.changes(since=since, limit=limit, include_docs=True)
+        
+        results = []
+        for change in changes["results"]:
+            if "doc" in change and change["doc"].get("type") == "item":
+                results.append(change["doc"])
+        
+        return {
+            "ok": True,
+            "results": results,
+            "last_seq": changes["last_seq"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting changes: {str(e)}")
+
+@app.post("/sync/replicate")
+def replicate_database(request: Dict[str, Any]):
+    """Replicate the entire database to CouchDB"""
+    if not couch_db:
+        raise HTTPException(status_code=503, detail="CouchDB is not available")
+    
+    try:
+        db = next(get_db())
+        
+        # Get all items from SQL database
+        db_items = db.query(DBItem).all()
+        
+        # Convert to CouchDB documents and save
+        for item in db_items:
+            doc = sql_to_couch_doc(item)
+            try:
+                existing_doc = couch_db.get(doc["_id"])
+                if existing_doc:
+                    doc["_rev"] = existing_doc["_rev"]
+                couch_db.save(doc)
+            except couchdb.http.ResourceNotFound:
+                couch_db.save(doc)
+        
+        return {"ok": True, "message": f"Replicated {len(db_items)} items to CouchDB"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during replication: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

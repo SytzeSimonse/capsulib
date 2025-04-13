@@ -64,6 +64,7 @@ class Item(Base):
     season = Column(String, nullable=True)
     is_second_hand = Column(String, nullable=True)
     pattern = Column(String, nullable=True)
+    url = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     
